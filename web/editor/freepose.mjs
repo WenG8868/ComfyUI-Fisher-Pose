@@ -15,7 +15,7 @@ import { readSkeletonImage } from './pose-import.mjs';
 import { readPoseKeypoints, largestBody, applicableBody, poseOverlay } from './pose-keypoints.mjs?v=20261010-feedback2';
 import { liftOpenPose, WORLD_KEYPOINT_NAMES } from './openpose-lift.mjs';
 import { COMMON_POSES, directionKeypoints } from './common-poses.mjs';
-import { isGroupPose, bindingRuntimeProblem } from '../binding_runtime.mjs';
+import { isTwoPersonPose, bindingRuntimeProblem } from '../binding_runtime.mjs?v=20261014-separate-words1';
 import { reconcilePortraits } from '../portrait_inputs.mjs';
 import { DEFAULT_FRAMING, frontFraming, isTurned, outputShot } from './framing.mjs?v=20261010-feedback2';
 
@@ -84,7 +84,7 @@ function instructionText() {
         const order = leftSource === 'left' ? 'Keep' : 'Exchange';
         return `Draw character from image2. Repose the existing two people in image2 to match image1. ${order} their left-to-right order: the person on the viewer's ${leftSource} in image2 takes the left mannequin pose in image1; the person on the viewer's ${rightSource} takes the right mannequin pose. Preserve their appearances and the scene.`;
     }
-    return `Draw the ${first} character from image2 in the pose of the ${first} mannequin in image1, and the ${second} character from image3 in the pose of the ${second} mannequin in image1.`;
+    return `Draw character from image2. Repose the person in image2 to match the ${first} mannequin in image1, and the person in image3 to match the ${second} mannequin in image1. Preserve their appearances and the scene.`;
 }
 const SKELETON_GUIDE_INSTRUCTION = 'The colored skeleton lines and joint markers in image1 are pose guides only; omit them from the finished image.';
 const promptText = () => [instructionText(), doc.outputSkeleton ? SKELETON_GUIDE_INSTRUCTION : '', ...extraPrompt.split('\n').map(line => line.trim())].filter(Boolean).join('\n');
@@ -1423,7 +1423,7 @@ async function checkEnvironment() {
     try {
         const env = await (await fetch('/fisher_pose/env', { cache: 'no-store' })).json();
         const problem = !env.qwen21 ? `${env.updateHint}（当前版本 ${env.version}）`
-            : isGroupPose(doc, secondReferenceConnected) ? bindingRuntimeProblem(env, location.origin) : '';
+            : isTwoPersonPose(doc) ? bindingRuntimeProblem(env, location.origin) : '';
         $('#env-banner').textContent = problem;
         $('#env-banner').hidden = !problem;
     } catch { /* standalone preview, or AIFISHER Canvas which does not proxy this route */ }
