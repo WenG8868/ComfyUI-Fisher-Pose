@@ -19,8 +19,12 @@
 .fp-gallery{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:360px;overflow-y:auto;border-radius:8px}
 .fp-gallery.drag{outline:2px dashed var(--blue);outline-offset:2px}
 .fp-gallery p{grid-column:1/-1;margin:0}
-.fp-thumb{padding:0;border:2px solid transparent;border-radius:6px;background:#000;overflow:hidden;aspect-ratio:3/2;position:relative}
-.fp-thumb img{width:100%;height:100%;object-fit:contain;display:block}
+/* 缩略图高度只能用 padding 撑开，不能用 aspect-ratio：Chromium 144（ComfyUI Desktop 内置引擎）
+   在「网格容器同时是滚动容器（内容超出 max-height）」时，算 auto 行高会丢掉网格项 aspect-ratio
+   转出的高度，行高塌成「边框 + 一行文字」，卡片相互重叠。百分比 padding 按列宽解析，再减掉上下
+   边框 4px，高度即精确等于 列宽×(高/宽)。同理 .fp-saved(1:1)、.fp-mannequin(3:4) 各自覆盖。 */
+.fp-thumb{padding:0 0 calc(66.6667% - 4px);height:0;border:2px solid transparent;border-radius:6px;background:#000;overflow:hidden;position:relative}
+.fp-thumb img{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;display:block}
 .fp-thumb span{position:absolute;left:0;right:0;bottom:0;font-size:8px;color:#dfe6f5;background:#000a;padding:1px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
 .fp-thumb.active{border-color:#6e8cff}
 .fp-thumb.failed{opacity:.35}
@@ -45,14 +49,14 @@
 .fp-sources{margin-bottom:10px}.fp-sources button{padding:5px 3px;font-size:11px;white-space:normal;line-height:1.35}
 .fp-save{margin-bottom:10px;border-color:#c5d2fb;color:#3858cc;background:#f3f6ff}
 .fp-save:hover{background:#e8eeff}
-.fp-saved .fp-thumb{background:#fff;border-color:#e3e8f1;aspect-ratio:1}
+.fp-saved .fp-thumb{background:#fff;border-color:#e3e8f1;padding-bottom:calc(100% - 4px)}
 .fp-saved .fp-thumb.active{border-color:#6e8cff}
 .fp-saved .fp-thumb span{color:#fff;background:#1a1f2ecc;font-size:9px;padding:2px 4px}
 .fp-delete{position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#1a1f2eb0;color:#fff;font-size:12px;font-style:normal;line-height:18px;text-align:center;opacity:0;cursor:pointer}
 .fp-saved .fp-thumb:hover .fp-delete{opacity:1}
 .fp-delete:hover{background:#e5484d}
 .fp-banner{position:absolute;top:56px;left:18px;right:18px;z-index:7;background:#fff1f0;border:1px solid #f3b1ab;color:#9b2c24;border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;box-shadow:0 6px 20px #0003}
-.fp-thumb.fp-mannequin{background:#fff;border-color:#e3e8f1;aspect-ratio:3/4}
+.fp-thumb.fp-mannequin{background:#fff;border-color:#e3e8f1;padding-bottom:calc(133.3333% - 4px)}
 .fp-thumb.fp-mannequin.active{border-color:#6e8cff}
 .fp-thumb.fp-mannequin span{color:#fff;background:#1a1f2ecc;font-size:9px;padding:2px 4px}
 .fp-detect{margin:0 0 10px}
