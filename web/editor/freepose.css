@@ -99,6 +99,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid #315acd;outline-off
 .fp-people button:hover{background:#3e4964;color:white}
 .fp-people button.active:hover{background:#e4ebfb;color:#243c70}
 .interaction-bar{padding:8px 2px;font-size:11px;color:#68758b;min-height:30px}
+#reference-hint{color:#a35a12;font-weight:600;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fp-binding{padding-bottom:18px;border-bottom:1px solid var(--line)}
 .fp-binding .section-heading{margin-bottom:12px}
 .fp-binding .section-heading>span{font-size:10px;color:#68758b}

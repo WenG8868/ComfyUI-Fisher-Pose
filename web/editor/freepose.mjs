@@ -8,6 +8,8 @@ import { createReferenceOverlay } from './reference-overlay.mjs';
 // Free-pose editor: one VNCCS MakeHuman mannequin. Editing uses a free orbit view;
 // the output is always the VNCCS front capture (yaw 0 / pitch 0, white background,
 // flat white ambient light), which is what the VNCCS_QI2_PoseStudio LoRA was trained on.
+// A limb folded along that view axis is invisible in the reference, so the editor warns
+// about the joints the front capture cannot read (see reference-view.mjs).
 import { PoseViewerCore } from '../vnccs/vnccs_pose_studio_core.mjs?v=20261010-xyz1';
 import { solveMorph, buildStaticModelData } from '../vnccs/vnccs_pose_morph_runtime.mjs';
 import { HAND_PRESETS } from '../vnccs/vnccs_hand_presets.mjs';
@@ -18,6 +20,7 @@ import { COMMON_POSES, directionKeypoints } from './common-poses.mjs';
 import { isTwoPersonPose, bindingRuntimeProblem } from '../binding_runtime.mjs?v=20261014-separate-words1';
 import { reconcilePortraits } from '../portrait_inputs.mjs';
 import { DEFAULT_FRAMING, frontFraming, isTurned, outputShot } from './framing.mjs?v=20261010-feedback2';
+import { hiddenParts, worstVisibility, MIN_SEGMENT_VISIBILITY } from './reference-view.mjs?v=20261014-refhint1';
 
 const $ = selector => document.querySelector(selector);
 const embedded = new URLSearchParams(location.search).has('embedded');
@@ -282,8 +285,68 @@ function capture(width, height) {
     return viewer.capture(width, height, framing.zoom, CAPTURE_BACKGROUND, framing.offsetX, framing.offsetY, FRONT.yaw, FRONT.pitch, doc.outputSkeleton);
 }
 
+// --- Reference readability warning -------------------------------------------
+// The front capture cannot show a limb folded along the view axis, and the model then keeps the
+// pose from image2 (a kneeling mannequin comes out standing). Measured, see reference-view.mjs:
+// turning the mannequin 60° or more transfers such a pose but drags the generated person's facing
+// along with it; a sentence in the prompt transfers it with the facing kept. Both cost the user
+// something, so the editor only names the hidden joints and leaves the choice to them.
+const REFERENCE_LIMBS = [
+    ['左大臂', 'upperarm_l', 'lowerarm_l'], ['右大臂', 'upperarm_r', 'lowerarm_r'],
+    ['左小臂', 'lowerarm_l', 'hand_l'], ['右小臂', 'lowerarm_r', 'hand_r'],
+    ['左大腿', 'thigh_l', 'calf_l'], ['右大腿', 'thigh_r', 'calf_r'],
+    ['左小腿', 'calf_l', 'foot_l'], ['右小腿', 'calf_r', 'foot_r'],
+    ['躯干', 'pelvis', 'head'],
+];
+const REFERENCE_HINT = '正面参考图里这些关节正对镜头，折在身体前后看不出来，模型容易沿用原图的姿势。'
+    + '点「人物转身」的「左侧 / 右侧」把参考图转到侧面重拍：实测要转到 60° 以上模型才会跟着变，'
+    + '出图人物的朝向也会跟着转。想保持朝向，就在「补充要求」里写一句这几段肢体的动作。';
+// Two mannequins are named by the same numbering as the 人物 buttons.
+const personLabel = index => (doc.people ? `人物 ${index + 1} · ` : '');
+
+function referenceParts() {
+    const THREE = viewer.THREE;
+    const parts = [];
+    const collect = (bones, label) => {
+        for (const [joint, from, to] of REFERENCE_LIMBS) {
+            const head = bones?.[from], tail = bones?.[to];
+            if (!head || !tail) continue;
+            const start = head.getWorldPosition(new THREE.Vector3());
+            const end = tail.getWorldPosition(new THREE.Vector3());
+            parts.push({ name: label + joint, segment: [end.x - start.x, end.y - start.y, end.z - start.z] });
+        }
+    };
+    // Bones hang under the mesh that 人物转身 rotates, so their world matrices carry the turn.
+    viewer.skinnedMesh?.updateMatrixWorld(true);
+    collect(viewer.bones, personLabel(doc.active ?? 0));
+    for (const [key, entry] of viewer.passiveCharacters) {
+        entry.mesh.updateMatrixWorld(true);
+        collect(entry.bones, personLabel(Number(key.split('-')[1])));
+    }
+    return parts;
+}
+
+// null so the first update logs a baseline; the guard keeps joint drags from rewriting the DOM.
+let referenceHint = null;
+function updateReferenceHint() {
+    const parts = referenceParts();
+    const hidden = hiddenParts(parts);
+    const text = hidden.map(part => part.name).join('、');
+    if (text === referenceHint) return;
+    referenceHint = text;
+    const element = $('#reference-hint');
+    element.hidden = !text;
+    element.textContent = text ? `⚠ 参考图看不清：${text}` : '';
+    element.title = text ? REFERENCE_HINT : '';
+    console.info(`[fisher-pose] 参考图可读性 最差 ${worstVisibility(parts).toFixed(2)}`
+        + `（低于 ${MIN_SEGMENT_VISIBILITY} 视为正对镜头）` + (text ? `，看不清：${text}` : '，全部可见'));
+}
+
+$('#reference-hint').onclick = () => { if (referenceHint) toast(REFERENCE_HINT); };
+
 function schedulePreview() {
     if (!ready) return;
+    updateReferenceHint();
     requestAutoFit();
     if (previewTimer) return;
     const revision = ++previewRevision;
@@ -975,6 +1038,7 @@ function removePerson() {
     forgetHistory();
     fitFrame(false);
     refreshPeople();
+    updateReferenceHint(); // the removed mannequin's joints must leave the warning
     $('#import-status').textContent = '已删除人物 2。';
 }
 
@@ -1321,6 +1385,7 @@ function refreshControls() {
     $('#description').textContent = promptText();
     refreshBoneSliders();
     refreshMovementTool();
+    updateReferenceHint();
 }
 
 // One undo entry per slider gesture: record before the first input event.
@@ -1482,6 +1547,7 @@ async function serialize() {
     clearTimeout(autoFitTimer); autoFitTimer = null;
     autoFrame();
     await viewer.waitForCaptureReady();
+    updateReferenceHint(); // log the readability of this very capture: "the pose did not follow" reports start here
     const poseReference = capture(doc.width, doc.height);
     updateCamera(false);
     doc.pose = savedPose();
