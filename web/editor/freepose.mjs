@@ -2,7 +2,10 @@ import { loadBodyPack } from './body-pack.mjs?v=20261010-feedback2';
 import { createMovementGizmo } from './movement-gizmo.mjs?v=20261010-xyz1';
 import { detectorOptions, detectionPrompt } from './pose-detector.mjs';
 import { editKeypoints } from './keypoint-editor.mjs';
-import { createBodyPresets, estimateProportions } from './body-presets.mjs';
+// 带 ?v= 才能让浏览器丢掉旧缓存：本文件没有 Cache-Control，只有 Etag/Last-Modified，
+// 浏览器按「启发式缓存」会连请求都不发，改了内容也读不到（保存身材点了没反应就是这么来的）。
+import { createBodyPresets, estimateProportions } from './body-presets.mjs?v=20261014-bodyfix1';
+import { askText, askConfirm } from './dialogs.mjs?v=20261014-dialog1';
 import { restorePoseShape, omitPoseShape } from './pose-shape.mjs';
 import { createReferenceOverlay } from './reference-overlay.mjs';
 // Free-pose editor: one VNCCS MakeHuman mannequin. Editing uses a free orbit view;
@@ -687,7 +690,7 @@ async function addFiles(files) {
 }
 
 $('#clear-gallery').onclick = async () => {
-    if (!libraryAvailable || !confirm(`清空我的图库中的 ${galleries.library.length} 张骨架图？\n（删除 ComfyUI/input/fisher_openpose 里的副本，原文件夹和 FISHER小彩蛋 不受影响）`)) return;
+    if (!libraryAvailable || !(await askConfirm(`清空我的图库中的 ${galleries.library.length} 张骨架图？\n（删除 ComfyUI/input/fisher_openpose 里的副本，原文件夹和 FISHER小彩蛋 不受影响）`, { danger: true }))) return;
     await fetch(LIBRARY_URL + '/clear', { method: 'POST' });
     await loadLibrary();
     toast('我的图库已清空');
@@ -714,6 +717,9 @@ galleryBox.addEventListener('drop', event => { event.preventDefault(); galleryBo
 // --- 我的姿势: whole editor states saved on the server (see saved_poses.py) ---
 
 const SAVED_URL = '/fisher_pose/saved_poses';
+// 列表单独一条路径：/fisher_pose/saved_poses 上同时有 GET 和 POST，热重载类插件同步路由时会按「路径」
+// 把该路径下所有方法的 handler 刷成最后注册的那个（GET 被 POST 抢走），列表请求就会拿到 400。
+const SAVED_LIST_URL = '/fisher_pose/saved_pose_list';
 let savedPoses = [];
 let savedAvailable = false;
 let activeSavedName = null;
@@ -738,10 +744,13 @@ function renderSaved() {
 
 async function loadSavedList() {
     try {
-        const response = await fetch(SAVED_URL, { cache: 'no-store' });
+        const response = await fetch(SAVED_LIST_URL, { cache: 'no-store' });
         if (response.ok) {
             savedPoses = (await response.json()).poses;
             savedAvailable = true;
+            console.log(`[Fisher Pose] 已存姿势列表：${savedPoses.length} 个`);
+        } else {
+            console.warn(`[Fisher Pose] 已存姿势列表请求失败：HTTP ${response.status}，保存按钮将保持禁用`);
         }
     } catch { /* standalone preview without the ComfyUI server */ }
     renderSaved();
@@ -760,8 +769,9 @@ const postPose = (name, record, overwrite) => fetch(SAVED_URL, {
 });
 
 async function saveCurrentPose(presetName) {
-    if (!savedAvailable || !ready) return;
-    const name = (typeof presetName === 'string' ? presetName : prompt('给这个姿势起个名字', defaultPoseName()))?.trim();
+    if (!ready) return;
+    if (!savedAvailable) { console.warn('[Fisher Pose] 保存不可用：姿势接口没连上，请查看控制台里上面那条列表请求的错误'); toast('保存不可用：连不上 ComfyUI 的姿势接口'); return; }
+    const name = (typeof presetName === 'string' ? presetName : await askText('给这个姿势起个名字', defaultPoseName()))?.trim();
     if (!name) return;
     await viewer.waitForCaptureReady();
     const scale = 256 / Math.max(doc.width, doc.height);
@@ -777,7 +787,7 @@ async function saveCurrentPose(presetName) {
     try {
         let response = await postPose(name, record, false);
         if (response.status === 409) {
-            if (!confirm(`已有名为「${name}」的姿势，要覆盖吗？`)) return;
+            if (!(await askConfirm(`已有名为「${name}」的姿势，要覆盖吗？`))) return;
             response = await postPose(name, record, true);
         }
         const result = await response.json();
@@ -809,7 +819,7 @@ async function loadSavedPose(entry) {
 }
 
 async function deleteSavedPose(entry, skipConfirm = false) {
-    if (!skipConfirm && !confirm(`删除姿势「${entry.name}」？`)) return;
+    if (!skipConfirm && !(await askConfirm(`删除姿势「${entry.name}」？`, { danger: true }))) return;
     try {
         await fetch(`${SAVED_URL}/${encodeURIComponent(entry.name)}/delete`, { method: 'POST' });
         if (activeSavedName === entry.name) activeSavedName = null;
@@ -1623,7 +1633,7 @@ async function start(payload) {
     loadModel(doc.pose);
     rebuildPassives();
     referenceOverlay = createReferenceOverlay(viewer);
-    bodyPresets = createBodyPresets({ getPerson: () => doc, apply: applyBodyShape, toast, container: $('#body-presets'),
+    bodyPresets = createBodyPresets({ getPerson: () => doc, apply: applyBodyShape, toast, container: $('#body-presets'), askText, askConfirm,
         thumbnail: async () => { await viewer.waitForCaptureReady(); const scale = 128 / Math.max(doc.width, doc.height); const thumbnail = capture(Math.round(doc.width * scale), Math.round(doc.height * scale)); updateCamera(false); return thumbnail; } });
     movementGizmo = createMovementGizmo(viewer, {
         getTransform: () => doc.transform,
